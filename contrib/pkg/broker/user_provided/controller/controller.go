@@ -119,7 +119,7 @@ func (c *userProvidedController) CreateServiceInstance(
 	if err != nil {
 		return nil, err
 	}
-	ns := "app"
+	ns := "test-ns"
 	pod := newDatabasePod(ns)
 	pod, err = cs.CoreV1().Pods(ns).Create(pod)
 	if err != nil {
