@@ -20,18 +20,14 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-
 	"github.com/golang/glog"
 	"github.com/kubernetes-incubator/service-catalog/contrib/pkg/broker/controller"
 	"github.com/kubernetes-incubator/service-catalog/pkg/brokerapi"
 	"github.com/kubernetes-incubator/service-catalog/pkg/util"
-
 	"github.com/gorilla/mux"
-
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	//"k8s.io/apimachinery/pkg/api/errors"  // TODO decomment once we start using the k8s client
 )
+
+
 
 type server struct {
 	controller controller.Controller
@@ -170,30 +166,14 @@ func (s *server) unBind(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) debug(w http.ResponseWriter, r *http.Request) {
-	glog.Warning("[DEBUG] External debug request.")
-
-	cs := getKubeClient()
-	ver, err := cs.ServerVersion()
-	if err != nil {
-		panic(err)
-	}
-	w.WriteHeader(http.StatusOK)
 	w.Header().Set("Content-Type", "application/json")
-
-	fmt.Fprint(w, fmt.Sprintf("[DEBUG]: Version==%v", ver))
+	debugMsg, err := s.controller.Debug()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprintf(w, "[DEBUG] Error: %q", err)
+	} else {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, "[DEBUG] Version: %q\n", debugMsg)
+	}
 }
 
-func getKubeClient() *kubernetes.Clientset {
-	glog.Info("Getting API Client config")
-	kubeClientConfig, err := rest.InClusterConfig()
-	if err != nil {
-		panic(err.Error())
-	}
-
-	glog.Info("Creating new Kubernetes Clientset")
-	cs, err := kubernetes.NewForConfig(kubeClientConfig)
-	if err != nil {
-		panic(err.Error())
-	}
-	return cs
-}

@@ -25,7 +25,14 @@ import (
 	"github.com/golang/glog"
 	"github.com/kubernetes-incubator/service-catalog/contrib/pkg/broker/controller"
 	"github.com/kubernetes-incubator/service-catalog/pkg/brokerapi"
+
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	//"k8s.io/apimachinery/pkg/api/errors"  // TODO decomment once we start using the k8s client
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/pkg/api/v1"
 )
+
 
 type errNoSuchInstance struct {
 	instanceID string
@@ -53,7 +60,11 @@ func CreateController() controller.Controller {
 	}
 }
 
+// TODO add our DB service here
+// TODO EITHER: figure out how to pass namespace to here  (track down brokerapi.CreateServiceInstanceRequest.Parameters)
+// TODO     OR: See if we can create pod in the default namespace
 func (c *userProvidedController) Catalog() (*brokerapi.Catalog, error) {
+	glog.Info("Controller Catalog Call")
 	return &brokerapi.Catalog{
 		Services: []*brokerapi.Service{
 			{
@@ -103,14 +114,30 @@ func (c *userProvidedController) CreateServiceInstance(
 		}
 	}
 
+	// Pod Provisioning Code
+	cs, err := getKubeClient()
+	if err != nil {
+		return nil, err
+	}
+	ns := "app"
+	pod := newDatabasePod(ns)
+	pod, err = cs.CoreV1().Pods(ns).Create(pod)
+	if err != nil {
+		glog.Error("Failed to Create pod: %q", err)
+	} else {
+		pjson, _ := json.MarshalIndent(pod, "", "    ")
+		glog.Infof("New Pod (ns: %s): %v", ns, string(pjson))
+	}
 	glog.Infof("Created User Provided Service Instance:\n%v\n", c.instanceMap[id])
 	return &brokerapi.CreateServiceInstanceResponse{}, nil
 }
 
+// TODO implement pod get
 func (c *userProvidedController) GetServiceInstance(id string) (string, error) {
 	return "", errors.New("Unimplemented")
 }
 
+// TODO implement pod deletion
 func (c *userProvidedController) RemoveServiceInstance(id string) (*brokerapi.DeleteServiceInstanceResponse, error) {
 	c.rwMutex.Lock()
 	defer c.rwMutex.Unlock()
@@ -123,6 +150,7 @@ func (c *userProvidedController) RemoveServiceInstance(id string) (*brokerapi.De
 	return &brokerapi.DeleteServiceInstanceResponse{}, nil
 }
 
+// TODO implement DB binding
 func (c *userProvidedController) Bind(
 	instanceID,
 	bindingID string,
@@ -138,7 +166,65 @@ func (c *userProvidedController) Bind(
 	return &brokerapi.CreateServiceBindingResponse{Credentials: *cred}, nil
 }
 
+
+//TODO implement DB unbinding
 func (c *userProvidedController) UnBind(instanceID string, bindingID string) error {
 	// Since we don't persist the binding, there's nothing to do here.
 	return nil
+}
+
+func (c *userProvidedController) Debug() (string, error) {
+	glog.Warning("[DEBUG] External debug request.")
+	cs, err := getKubeClient()
+	if err != nil {
+		return "", err
+	}
+	msg, err := cs.ServerVersion()
+	return  msg.String(), err
+}
+
+func getKubeClient() (*kubernetes.Clientset, error){
+	glog.Info("Getting API Client config")
+	kubeClientConfig, err := rest.InClusterConfig()
+	if err != nil {
+		panic(err.Error())
+	}
+
+	glog.Info("Creating new Kubernetes Clientset")
+	cs, err := kubernetes.NewForConfig(kubeClientConfig)
+	return cs, err
+}
+
+// TODO find a DB image to use here
+// TODO figure out how to get the credentials
+// TODO currently just a debian pod for testing
+// TODO probably better to use a Deployment so we can keep it behind a known IP.
+// TODO DB and webserver pod templates in kubernetes/examples.  Might be useful
+func newDatabasePod(ns string) *v1.Pod {
+	return &v1.Pod{
+		TypeMeta: metav1.TypeMeta{
+			Kind: "Pod",
+			APIVersion: "v1",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "debian",	// to mongo
+		},
+		Spec: v1.PodSpec{
+			Containers: []v1.Container {
+				{
+					Name: "debian",					  // to "mongo"
+					Image: "docker.io/debian:latest", // to "docker.io/mongo"
+					ImagePullPolicy: "IfNotPresent",
+					Ports: []v1.ContainerPort{
+						{
+							Name: "mongodb",
+							ContainerPort: 27017, // mongoDB port
+						},
+					},
+					Command: []string {"/bin/bash"},
+					Args: []string {"-c", "while : ; do sleep 10; done"},
+				},
+			},
+		},
+	}
 }

@@ -31,4 +31,6 @@ type Controller interface {
 
 	Bind(instanceID string, bindingID string, req *brokerapi.BindingRequest) (*brokerapi.CreateServiceBindingResponse, error)
 	UnBind(instanceID string, bindingID string) error
+
+	Debug() (string, error)
 }
