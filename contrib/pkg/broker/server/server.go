@@ -18,16 +18,14 @@ package server
 
 import (
 	"fmt"
-	"net/http"
-	"strconv"
 	"github.com/golang/glog"
+	"github.com/gorilla/mux"
 	"github.com/kubernetes-incubator/service-catalog/contrib/pkg/broker/controller"
 	"github.com/kubernetes-incubator/service-catalog/pkg/brokerapi"
 	"github.com/kubernetes-incubator/service-catalog/pkg/util"
-	"github.com/gorilla/mux"
+	"net/http"
+	"strconv"
 )
-
-
 
 type server struct {
 	controller controller.Controller
@@ -176,4 +174,3 @@ func (s *server) debug(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "[DEBUG] Version: %q\n", debugMsg)
 	}
 }
-

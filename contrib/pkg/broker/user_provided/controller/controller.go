@@ -26,13 +26,8 @@ import (
 	"github.com/kubernetes-incubator/service-catalog/contrib/pkg/broker/controller"
 	"github.com/kubernetes-incubator/service-catalog/pkg/brokerapi"
 
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	//"k8s.io/apimachinery/pkg/api/errors"  // TODO decomment once we start using the k8s client
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/pkg/api/v1"
 )
-
 
 type errNoSuchInstance struct {
 	instanceID string
@@ -45,12 +40,18 @@ func (e errNoSuchInstance) Error() string {
 type userProvidedServiceInstance struct {
 	Name       string
 	Credential *brokerapi.Credential
+	PodMeta    *metav1.ObjectMeta
 }
 
 type userProvidedController struct {
 	rwMutex     sync.RWMutex
 	instanceMap map[string]*userProvidedServiceInstance
 }
+
+const (
+	serviceidUserProvided string = "4f6e6cf6-ffdd-425f-a2c7-3c9258ad2468"
+	serviceidDatabasePod  string = "database-1"
+)
 
 // CreateController creates an instance of a User Provided service broker controller.
 func CreateController() controller.Controller {
@@ -64,12 +65,12 @@ func CreateController() controller.Controller {
 // TODO EITHER: figure out how to pass namespace to here  (track down brokerapi.CreateServiceInstanceRequest.Parameters)
 // TODO     OR: See if we can create pod in the default namespace
 func (c *userProvidedController) Catalog() (*brokerapi.Catalog, error) {
-	glog.Info("Controller Catalog Call")
+	glog.Info("[DEBUG] Handling Catalog Request")
 	return &brokerapi.Catalog{
 		Services: []*brokerapi.Service{
 			{
 				Name:        "user-provided-service",
-				ID:          "4f6e6cf6-ffdd-425f-a2c7-3c9258ad2468",
+				ID:          serviceidUserProvided,
 				Description: "A user provided service",
 				Plans: []brokerapi.ServicePlan{{
 					Name:        "default",
@@ -77,6 +78,20 @@ func (c *userProvidedController) Catalog() (*brokerapi.Catalog, error) {
 					Description: "Sample plan description",
 					Free:        true,
 				},
+				},
+				Bindable: true,
+			},
+			{
+				Name:        "database-service",
+				ID:          serviceidDatabasePod,
+				Description: "A Hacky little pod service.",
+				Plans: []brokerapi.ServicePlan{
+					{
+						Name:        "default",
+						ID:          "default",
+						Description: "There is only one, and this is it.",
+						Free:        true,
+					},
 				},
 				Bindable: true,
 			},
@@ -114,21 +129,24 @@ func (c *userProvidedController) CreateServiceInstance(
 		}
 	}
 
-	// Pod Provisioning Code
-	cs, err := getKubeClient()
-	if err != nil {
-		return nil, err
+	// DEBUG
+	reqJson, _ := json.MarshalIndent(req, "", "    ")
+	glog.Info("[DEBUG] New CreateServiceInstanceRequest:\n%#v", string(reqJson))
+
+	// Branch provisioning logic based on service id
+	var podMeta *metav1.ObjectMeta
+	var err error
+	switch req.ServiceID {
+	case serviceidDatabasePod:
+		podMeta, err = provisionInstancePod(id, req.ContextProfile.Namespace)
+		if err != nil {
+			return nil, err
+		}
+		c.instanceMap[id].PodMeta = podMeta
+	case serviceidUserProvided:
+		break
 	}
-	ns := "test-ns"
-	pod := newDatabasePod(ns)
-	pod, err = cs.CoreV1().Pods(ns).Create(pod)
-	if err != nil {
-		glog.Error("Failed to Create pod: %q", err)
-	} else {
-		pjson, _ := json.MarshalIndent(pod, "", "    ")
-		glog.Infof("New Pod (ns: %s): %v", ns, string(pjson))
-	}
-	glog.Infof("Created User Provided Service Instance:\n%v\n", c.instanceMap[id])
+	glog.Infof("Created User Provided Service Instance: %q", c.instanceMap[id].Name)
 	return &brokerapi.CreateServiceInstanceResponse{}, nil
 }
 
@@ -141,12 +159,18 @@ func (c *userProvidedController) GetServiceInstance(id string) (string, error) {
 func (c *userProvidedController) RemoveServiceInstance(id string) (*brokerapi.DeleteServiceInstanceResponse, error) {
 	c.rwMutex.Lock()
 	defer c.rwMutex.Unlock()
-	_, ok := c.instanceMap[id]
-	if ok {
-		delete(c.instanceMap, id)
-		return &brokerapi.DeleteServiceInstanceResponse{}, nil
+	if _, ok := c.instanceMap[id]; ! ok {
+		return &brokerapi.DeleteServiceInstanceResponse{}, fmt.Errorf("Instance <%v> not found", id)
 	}
-
+	if c.instanceMap[id].PodMeta != nil {
+		if err := deprovisionInstancePod(c.instanceMap[id].PodMeta); err != nil {
+			errmsg := fmt.Errorf("Error deleting intance pod %q (ns: %q): %v",
+				c.instanceMap[id].PodMeta.Name, c.instanceMap[id].PodMeta.Namespace, err)
+			glog.Error(errmsg)
+			return &brokerapi.DeleteServiceInstanceResponse{}, errmsg
+		}
+	}
+	delete(c.instanceMap, id)
 	return &brokerapi.DeleteServiceInstanceResponse{}, nil
 }
 
@@ -166,7 +190,6 @@ func (c *userProvidedController) Bind(
 	return &brokerapi.CreateServiceBindingResponse{Credentials: *cred}, nil
 }
 
-
 //TODO implement DB unbinding
 func (c *userProvidedController) UnBind(instanceID string, bindingID string) error {
 	// Since we don't persist the binding, there's nothing to do here.
@@ -180,51 +203,5 @@ func (c *userProvidedController) Debug() (string, error) {
 		return "", err
 	}
 	msg, err := cs.ServerVersion()
-	return  msg.String(), err
-}
-
-func getKubeClient() (*kubernetes.Clientset, error){
-	glog.Info("Getting API Client config")
-	kubeClientConfig, err := rest.InClusterConfig()
-	if err != nil {
-		panic(err.Error())
-	}
-
-	glog.Info("Creating new Kubernetes Clientset")
-	cs, err := kubernetes.NewForConfig(kubeClientConfig)
-	return cs, err
-}
-
-// TODO find a DB image to use here
-// TODO figure out how to get the credentials
-// TODO currently just a debian pod for testing
-// TODO probably better to use a Deployment so we can keep it behind a known IP.
-// TODO DB and webserver pod templates in kubernetes/examples.  Might be useful
-func newDatabasePod(ns string) *v1.Pod {
-	return &v1.Pod{
-		TypeMeta: metav1.TypeMeta{
-			Kind: "Pod",
-			APIVersion: "v1",
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "debian",	// to mongo
-		},
-		Spec: v1.PodSpec{
-			Containers: []v1.Container {
-				{
-					Name: "debian",					  // to "mongo"
-					Image: "docker.io/debian:latest", // to "docker.io/mongo"
-					ImagePullPolicy: "IfNotPresent",
-					Ports: []v1.ContainerPort{
-						{
-							Name: "mongodb",
-							ContainerPort: 27017, // mongoDB port
-						},
-					},
-					Command: []string {"/bin/bash"},
-					Args: []string {"-c", "while : ; do sleep 10; done"},
-				},
-			},
-		},
-	}
+	return msg.String(), err
 }
