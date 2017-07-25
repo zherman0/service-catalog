@@ -22,11 +22,11 @@ import (
 	"fmt"
 	"sync"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"github.com/golang/glog"
 	"github.com/kubernetes-incubator/service-catalog/contrib/pkg/broker/controller"
 	"github.com/kubernetes-incubator/service-catalog/pkg/brokerapi"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type errNoSuchInstance struct {
