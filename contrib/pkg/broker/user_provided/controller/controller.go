@@ -18,15 +18,12 @@ package controller
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sync"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"github.com/golang/glog"
 	"github.com/kubernetes-incubator/service-catalog/contrib/pkg/broker/controller"
 	"github.com/kubernetes-incubator/service-catalog/pkg/brokerapi"
-
 )
 
 type errNoSuchInstance struct {
@@ -34,13 +31,15 @@ type errNoSuchInstance struct {
 }
 
 func (e errNoSuchInstance) Error() string {
-	return fmt.Sprintf("no such instance with ID %s", e.instanceID)
+	return fmt.Sprintf("No such instance with ID %s", e.instanceID)
 }
 
 type userProvidedServiceInstance struct {
-	Name       string
-	Credential *brokerapi.Credential
-	PodMeta    *metav1.ObjectMeta
+	Name         string    				`json:"name"`
+	ServiceID    string    				`json:"serviceid"`
+	Credential   *brokerapi.Credential 	`json:"credential"`
+	PodName      string    				`json:"podname"`
+	PodNamespace string 				`json:"podnamespace"`
 }
 
 type userProvidedController struct {
@@ -62,8 +61,6 @@ func CreateController() controller.Controller {
 }
 
 // TODO add our DB service here
-// TODO EITHER: figure out how to pass namespace to here  (track down brokerapi.CreateServiceInstanceRequest.Parameters)
-// TODO     OR: See if we can create pod in the default namespace
 func (c *userProvidedController) Catalog() (*brokerapi.Catalog, error) {
 	glog.Info("[DEBUG] Handling Catalog Request")
 	return &brokerapi.Catalog{
@@ -103,9 +100,24 @@ func (c *userProvidedController) CreateServiceInstance(
 	id string,
 	req *brokerapi.CreateServiceInstanceRequest,
 ) (*brokerapi.CreateServiceInstanceResponse, error) {
-	credString, ok := req.Parameters["credentials"]
 	c.rwMutex.Lock()
 	defer c.rwMutex.Unlock()
+
+	//DEBUG
+	glog.Info("[DEBUG] New CreateServiceInstanceRequest (ID: %q)", id)
+
+
+	if _, ok := c.instanceMap[id]; ok {
+		return nil, fmt.Errorf("Instance %q already exists", id)
+	}
+	// Create New Instance
+	c.instanceMap[id] = &userProvidedServiceInstance{
+		Name:      id,
+		ServiceID: req.ServiceID,
+	}
+
+	// Extract credentials from request or generate dummy
+	credString, ok := req.Parameters["credentials"]
 	if ok {
 		jsonCred, err := json.Marshal(credString)
 		if err != nil {
@@ -114,64 +126,68 @@ func (c *userProvidedController) CreateServiceInstance(
 		}
 		var cred brokerapi.Credential
 		err = json.Unmarshal(jsonCred, &cred)
-
-		c.instanceMap[id] = &userProvidedServiceInstance{
-			Name:       id,
-			Credential: &cred,
-		}
+		c.instanceMap[id].Credential =  &cred
 	} else {
-		c.instanceMap[id] = &userProvidedServiceInstance{
-			Name: id,
-			Credential: &brokerapi.Credential{
-				"special-key-1": "special-value-1",
-				"special-key-2": "special-value-2",
-			},
+		c.instanceMap[id].Credential = &brokerapi.Credential{
+			"special-key-1": "special-value-1",
+			"special-key-2": "special-value-2",
 		}
 	}
 
-	// DEBUG
-	reqJson, _ := json.MarshalIndent(req, "", "    ")
-	glog.Info("[DEBUG] New CreateServiceInstanceRequest:\n%#v", string(reqJson))
-
-	// Branch provisioning logic based on service id
-	var podMeta *metav1.ObjectMeta
-	var err error
-	switch req.ServiceID {
+	// Do provisioning logic based on service id
+	switch c.instanceMap[id].ServiceID {
+	case serviceidUserProvided:
+		break
 	case serviceidDatabasePod:
-		podMeta, err = provisionInstancePod(id, req.ContextProfile.Namespace)
+		name, ns, err := provisionInstancePod(id, req.ContextProfile.Namespace)
 		if err != nil {
 			return nil, err
 		}
-		c.instanceMap[id].PodMeta = podMeta
-	case serviceidUserProvided:
-		break
+		c.instanceMap[id].PodName = name
+		c.instanceMap[id].PodNamespace = ns
+
 	}
 	glog.Infof("Created User Provided Service Instance: %q", c.instanceMap[id].Name)
-	return &brokerapi.CreateServiceInstanceResponse{}, nil
+	return nil, nil
 }
 
-// TODO implement pod get
 func (c *userProvidedController) GetServiceInstance(id string) (string, error) {
-	return "", errors.New("Unimplemented")
+	c.rwMutex.Lock()
+	defer c.rwMutex.Unlock()
+
+	// DEBUG
+	glog.Infof("[DEBUG] GetServiceInstance, ID: %q", id)
+
+	if _, ok := c.instanceMap[id]; ! ok {
+		return "", errNoSuchInstance{instanceID: id }
+	}
+	instance, _ := json.Marshal(c.instanceMap[id])
+	return string(instance), nil
 }
 
-// TODO implement pod deletion
 func (c *userProvidedController) RemoveServiceInstance(id string) (*brokerapi.DeleteServiceInstanceResponse, error) {
 	c.rwMutex.Lock()
 	defer c.rwMutex.Unlock()
+
+	// DEBUG
+	glog.Infof("[DEBUG] RemoveServiceInstance %q", id)
+
 	if _, ok := c.instanceMap[id]; ! ok {
-		return &brokerapi.DeleteServiceInstanceResponse{}, fmt.Errorf("Instance <%v> not found", id)
+		return nil, errNoSuchInstance{instanceID: id}
 	}
-	if c.instanceMap[id].PodMeta != nil {
-		if err := deprovisionInstancePod(c.instanceMap[id].PodMeta); err != nil {
+	switch c.instanceMap[id].ServiceID {
+	case serviceidUserProvided:
+		break
+	case serviceidDatabasePod:
+		if err := deprovisionInstancePod(c.instanceMap[id].PodName, c.instanceMap[id].PodNamespace); err != nil {
 			errmsg := fmt.Errorf("Error deleting intance pod %q (ns: %q): %v",
-				c.instanceMap[id].PodMeta.Name, c.instanceMap[id].PodMeta.Namespace, err)
+				c.instanceMap[id].PodName, c.instanceMap[id].PodNamespace, err)
 			glog.Error(errmsg)
-			return &brokerapi.DeleteServiceInstanceResponse{}, errmsg
+			return nil, errmsg
 		}
 	}
 	delete(c.instanceMap, id)
-	return &brokerapi.DeleteServiceInstanceResponse{}, nil
+	return nil, nil
 }
 
 // TODO implement DB binding
@@ -197,7 +213,7 @@ func (c *userProvidedController) UnBind(instanceID string, bindingID string) err
 }
 
 func (c *userProvidedController) Debug() (string, error) {
-	glog.Warning("[DEBUG] External debug request.")
+	glog.Info("[DEBUG] External debug request.")
 	cs, err := getKubeClient()
 	if err != nil {
 		return "", err

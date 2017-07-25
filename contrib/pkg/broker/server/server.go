@@ -47,8 +47,8 @@ func CreateHandler(c controller.Controller) http.Handler {
 	router.HandleFunc("/v2/service_instances/{instance_id}", s.removeServiceInstance).Methods("DELETE")
 	router.HandleFunc("/v2/service_instances/{instance_id}/service_bindings/{binding_id}", s.bind).Methods("PUT")
 	router.HandleFunc("/v2/service_instances/{instance_id}/service_bindings/{binding_id}", s.unBind).Methods("DELETE")
-
 	router.HandleFunc("/debug", s.debug).Methods("GET")
+
 	return router
 }
 
@@ -63,7 +63,7 @@ func Start(serverPort int, c controller.Controller) {
 }
 
 func (s *server) catalog(w http.ResponseWriter, r *http.Request) {
-	glog.Infof("Get Service Broker Catalog...")
+	glog.Infof("Getting Service Broker Catalog...")
 
 	if result, err := s.controller.Catalog(); err == nil {
 		util.WriteResponse(w, http.StatusOK, result)
@@ -74,7 +74,7 @@ func (s *server) catalog(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) getServiceInstance(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["instance_id"]
-	glog.Infof("GetServiceInstance ... %s\n", id)
+	glog.Infof("Getting ServiceInstance ... %s\n", id)
 
 	if result, err := s.controller.GetServiceInstance(id); err == nil {
 		util.WriteResponse(w, http.StatusOK, result)
@@ -85,7 +85,7 @@ func (s *server) getServiceInstance(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) createServiceInstance(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["instance_id"]
-	glog.Infof("CreateServiceInstance %s...\n", id)
+	glog.Infof("Creating ServiceInstance %s...\n", id)
 
 	var req brokerapi.CreateServiceInstanceRequest
 	if err := util.BodyToObject(r, &req); err != nil {
@@ -110,7 +110,7 @@ func (s *server) createServiceInstance(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) removeServiceInstance(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["instance_id"]
-	glog.Infof("RemoveServiceInstance %s...\n", id)
+	glog.Infof("Removing ServiceInstance %s...\n", id)
 
 	if result, err := s.controller.RemoveServiceInstance(id); err == nil {
 		util.WriteResponse(w, http.StatusOK, result)

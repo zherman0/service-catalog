@@ -9,45 +9,51 @@ import (
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/pkg/api/v1"
-	"fmt"
 )
 
-func provisionInstancePod(nameSuffix, ns string) (*metav1.ObjectMeta, error) {
+func provisionInstancePod(nameSuffix, ns string) (string, string, error) {
 	cs, err := getKubeClient()
 	if err != nil {
-		return nil, err
+		return "", "", err
 	}
 	if ns == "" {
 		glog.Error("Request Context does not contain a Namespace")
-		return nil, errors.New("Namespace not detected in Request")
+		return "", "", errors.New("Namespace not detected in Request")
 	}
 	pod := newDatabasePod(nameSuffix, ns)
-	glog.Infof("Deploying Database PodMeta %q (ns: %q)", pod.Name, pod.Namespace )
 	pod, err = cs.CoreV1().Pods(ns).Create(pod)
 	if err != nil {
 		glog.Errorf("Failed to Create pod: %q", err)
-		return nil, err
+		return "", "", err
 	} else {
 		glog.Infof("Provisioned Instance Pod %q (ns: %s)", pod.Name, ns)
 	}
-	return &pod.ObjectMeta, nil
+	return pod.Name, pod.Namespace, nil
 }
 
-func deprovisionInstancePod(podMeta *metav1.ObjectMeta) error {
+func deprovisionInstancePod(name, ns string) error {
 	cs, err := getKubeClient()
 	if err != nil {
 		return err
 	}
-	glog.Infof("Deleting Instance pod %q (ns: %s)", podMeta.Name, podMeta.Namespace)
-	err = cs.CoreV1().Pods(podMeta.Namespace).Delete(podMeta.Name, &metav1.DeleteOptions{})
+	glog.Infof("Deleting Instance pod %q (ns: %s)", name,  ns)
+	err = cs.CoreV1().Pods(ns).Delete(name, &metav1.DeleteOptions{})
 	if ! apierrs.IsNotFound(err) {
 		return err
 	}
 	return nil
 }
 
-func getInstancePod() (*v1.Pod, error) {
-	return nil, fmt.Errorf("getInstancePod not implemented")
+func getInstancePod(name, ns string) (string, error) {
+	cs, err := getKubeClient()
+	if err != nil {
+		return "", err
+	}
+	pod, err := cs.Pods(ns).Get(name, metav1.GetOptions{})
+	if err != nil {
+		return "", err
+	}
+	return string(pod.Status.Phase), nil
 }
 
 func getKubeClient() (*kubernetes.Clientset, error) {
