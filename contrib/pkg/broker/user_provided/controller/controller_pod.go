@@ -4,11 +4,11 @@ import (
 	"errors"
 
 	"github.com/golang/glog"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/pkg/api/v1"
+	"k8s.io/client-go/rest"
 )
 
 func provisionInstancePod(nameSuffix, ns string) (string, string, error) {
@@ -36,7 +36,7 @@ func deprovisionInstancePod(name, ns string) error {
 	if err != nil {
 		return err
 	}
-	glog.Infof("Deleting Instance pod %q (ns: %s)", name,  ns)
+	glog.Infof("Deleting Instance pod %q (ns: %s)", name, ns)
 	err = cs.CoreV1().Pods(ns).Delete(name, &metav1.DeleteOptions{})
 	if ! apierrs.IsNotFound(err) {
 		return err
@@ -80,13 +80,13 @@ func newDatabasePod(instanceID, ns string) *v1.Pod {
 			APIVersion: "v1",
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "podinst-" + instanceID , // to mongo // TODO generate unique but identifiable names
+			GenerateName: "mongo-" + ns + "-", // to mongo // TODO generate unique but identifiable names
 		},
 		Spec: v1.PodSpec{
 			Containers: []v1.Container{
 				{
-					Name:            "debian",                  // to "mongo"
-					Image:           "docker.io/debian:latest", // to "docker.io/mongo"
+					Name:            "mongo",                  // to "mongo"
+					Image:           "docker.io/mongo:latest", // to "docker.io/mongo"
 					ImagePullPolicy: "IfNotPresent",
 					Ports: []v1.ContainerPort{
 						{
@@ -94,8 +94,6 @@ func newDatabasePod(instanceID, ns string) *v1.Pod {
 							ContainerPort: 27017, // mongoDB port
 						},
 					},
-					Command: []string{"/bin/bash"},
-					Args:    []string{"-c", "while : ; do sleep 10; done"},
 				},
 			},
 		},
