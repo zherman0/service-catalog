@@ -35,11 +35,11 @@ func (e errNoSuchInstance) Error() string {
 }
 
 type userProvidedServiceInstance struct {
-	Name         string    				`json:"name"`
-	ServiceID    string    				`json:"serviceid"`
-	Credential   *brokerapi.Credential 	`json:"credential"`
-	PodName      string    				`json:"podname"`
-	PodNamespace string 				`json:"podnamespace"`
+	Name         string                    `json:"name"`
+	ServiceID    string                    `json:"serviceid"`
+	Credential   *brokerapi.Credential    `json:"credential"`
+	PodName      string                    `json:"podname"`
+	PodNamespace string                `json:"podnamespace"`
 }
 
 type userProvidedController struct {
@@ -60,7 +60,6 @@ func CreateController() controller.Controller {
 	}
 }
 
-// TODO add our DB service here
 func (c *userProvidedController) Catalog() (*brokerapi.Catalog, error) {
 	glog.Info("[DEBUG] Handling Catalog Request")
 	return &brokerapi.Catalog{
@@ -106,7 +105,6 @@ func (c *userProvidedController) CreateServiceInstance(
 	//DEBUG
 	glog.Info("[DEBUG] New CreateServiceInstanceRequest (ID: %q)", id)
 
-
 	if _, ok := c.instanceMap[id]; ok {
 		return nil, fmt.Errorf("Instance %q already exists", id)
 	}
@@ -126,7 +124,7 @@ func (c *userProvidedController) CreateServiceInstance(
 		}
 		var cred brokerapi.Credential
 		err = json.Unmarshal(jsonCred, &cred)
-		c.instanceMap[id].Credential =  &cred
+		c.instanceMap[id].Credential = &cred
 	} else {
 		c.instanceMap[id].Credential = &brokerapi.Credential{
 			"special-key-1": "special-value-1",
@@ -190,7 +188,6 @@ func (c *userProvidedController) RemoveServiceInstance(id string) (*brokerapi.De
 	return nil, nil
 }
 
-// TODO implement DB binding
 func (c *userProvidedController) Bind(
 	instanceID,
 	bindingID string,
@@ -202,6 +199,20 @@ func (c *userProvidedController) Bind(
 	if !ok {
 		return nil, errNoSuchInstance{instanceID: instanceID}
 	}
+	switch c.instanceMap[instanceID].ServiceID {
+	case serviceidUserProvided:
+		break
+	case serviceidDatabasePod:
+		podIP, podPort, err := getInstancePodIP(c.instanceMap[instanceID])
+		if err != nil {
+			return nil, err
+		}
+		return &brokerapi.CreateServiceBindingResponse{
+			Credentials: brokerapi.Credential{
+				"mongo_svc_ip_port": fmt.Sprintf("%s:%d", podIP, podPort),
+			},
+		}, nil
+	}
 	cred := instance.Credential
 	return &brokerapi.CreateServiceBindingResponse{Credentials: *cred}, nil
 }
@@ -210,14 +221,4 @@ func (c *userProvidedController) Bind(
 func (c *userProvidedController) UnBind(instanceID string, bindingID string) error {
 	// Since we don't persist the binding, there's nothing to do here.
 	return nil
-}
-
-func (c *userProvidedController) Debug() (string, error) {
-	glog.Info("[DEBUG] External debug request.")
-	cs, err := getKubeClient()
-	if err != nil {
-		return "", err
-	}
-	msg, err := cs.ServerVersion()
-	return msg.String(), err
 }

@@ -47,7 +47,6 @@ func CreateHandler(c controller.Controller) http.Handler {
 	router.HandleFunc("/v2/service_instances/{instance_id}", s.removeServiceInstance).Methods("DELETE")
 	router.HandleFunc("/v2/service_instances/{instance_id}/service_bindings/{binding_id}", s.bind).Methods("PUT")
 	router.HandleFunc("/v2/service_instances/{instance_id}/service_bindings/{binding_id}", s.unBind).Methods("DELETE")
-	router.HandleFunc("/debug", s.debug).Methods("GET")
 
 	return router
 }
@@ -161,17 +160,5 @@ func (s *server) unBind(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "{}") //id)
 	} else {
 		util.WriteResponse(w, http.StatusBadRequest, err)
-	}
-}
-
-func (s *server) debug(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	debugMsg, err := s.controller.Debug()
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, "[DEBUG] Error: %q", err)
-	} else {
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, "[DEBUG] Version: %q\n", debugMsg)
 	}
 }

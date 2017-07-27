@@ -1,9 +1,9 @@
 apiVersion: servicecatalog.k8s.io/v1alpha1
 kind: Binding
 metadata:
-  name: ups-binding
+  name: database-binding
   namespace: test-ns
 spec:
   instanceRef:
-    name: ups-instance
+    name: database-instance
   secretName: my-secret

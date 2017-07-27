@@ -4,11 +4,15 @@ import (
 	"errors"
 
 	"github.com/golang/glog"
-	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/pkg/api/v1"
 	"k8s.io/client-go/rest"
+	apierrs "k8s.io/apimachinery/pkg/api/errors"
+)
+const (
+	dbuser = "dbuser"
+	dbpwd  = "dbpwd"
 )
 
 func provisionInstancePod(nameSuffix, ns string) (string, string, error) {
@@ -44,16 +48,16 @@ func deprovisionInstancePod(name, ns string) error {
 	return nil
 }
 
-func getInstancePod(name, ns string) (string, error) {
+func getInstancePodIP(instance *userProvidedServiceInstance) (string, int32, error) {
 	cs, err := getKubeClient()
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
-	pod, err := cs.Pods(ns).Get(name, metav1.GetOptions{})
+	pod, err := cs.Pods(instance.PodNamespace).Get(instance.PodName, metav1.GetOptions{})
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
-	return string(pod.Status.Phase), nil
+	return pod.Status.PodIP, pod.Spec.Containers[0].Ports[0].ContainerPort, nil
 }
 
 func getKubeClient() (*kubernetes.Clientset, error) {
