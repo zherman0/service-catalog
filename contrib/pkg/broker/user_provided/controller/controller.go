@@ -35,11 +35,10 @@ func (e errNoSuchInstance) Error() string {
 }
 
 type userProvidedServiceInstance struct {
-	Name         string                    `json:"name"`
-	ServiceID    string                    `json:"serviceid"`
-	Credential   *brokerapi.Credential    `json:"credential"`
-	PodName      string                    `json:"podname"`
-	PodNamespace string                `json:"podnamespace"`
+	Id         string                   `json:"id"`
+	Namespace  string                   `json:"namespace"`
+	ServiceID  string                   `json:"serviceid"`
+	Credential *brokerapi.Credential    `json:"credential"`
 }
 
 type userProvidedController struct {
@@ -110,7 +109,7 @@ func (c *userProvidedController) CreateServiceInstance(
 	}
 	// Create New Instance
 	c.instanceMap[id] = &userProvidedServiceInstance{
-		Name:      id,
+		Id:        id,
 		ServiceID: req.ServiceID,
 	}
 
@@ -137,15 +136,13 @@ func (c *userProvidedController) CreateServiceInstance(
 	case serviceidUserProvided:
 		break
 	case serviceidDatabasePod:
-		name, ns, err := provisionInstancePod(id, req.ContextProfile.Namespace)
+		ns, err := provisionDBInstance(id, req.ContextProfile.Namespace)
 		if err != nil {
 			return nil, err
 		}
-		c.instanceMap[id].PodName = name
-		c.instanceMap[id].PodNamespace = ns
-
+		c.instanceMap[id].Namespace = ns
 	}
-	glog.Infof("Created User Provided Service Instance: %q", c.instanceMap[id].Name)
+	glog.Infof("Provisioned Instance: %q", c.instanceMap[id].Id)
 	return nil, nil
 }
 
@@ -177,13 +174,13 @@ func (c *userProvidedController) RemoveServiceInstance(id string) (*brokerapi.De
 	case serviceidUserProvided:
 		break
 	case serviceidDatabasePod:
-		if err := deprovisionInstancePod(c.instanceMap[id].PodName, c.instanceMap[id].PodNamespace); err != nil {
-			errmsg := fmt.Errorf("Error deleting intance pod %q (ns: %q): %v",
-				c.instanceMap[id].PodName, c.instanceMap[id].PodNamespace, err)
-			glog.Error(errmsg)
-			return nil, errmsg
+		if err := deprovisionDBInstance(id, c.instanceMap[id].Namespace); err != nil {
+			err = fmt.Errorf("Error deprovisioning instance %q, %v", id, err)
+			glog.Error(err)
+			return nil, err
 		}
 	}
+	glog.Infof("Deprovisioned Instance: %q", c.instanceMap[id].Id)
 	delete(c.instanceMap, id)
 	return nil, nil
 }
@@ -214,11 +211,11 @@ func (c *userProvidedController) Bind(
 		}, nil
 	}
 	cred := instance.Credential
+	glog.Infof("Bound Instance: %q", instanceID)
 	return &brokerapi.CreateServiceBindingResponse{Credentials: *cred}, nil
 }
 
 //TODO implement DB unbinding
 func (c *userProvidedController) UnBind(instanceID string, bindingID string) error {
-	// Since we don't persist the binding, there's nothing to do here.
 	return nil
 }
