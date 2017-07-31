@@ -16,16 +16,17 @@ function waitForContainerRunning() {
   elapsed=0
   err=0
 
-  until (( elapsed > maxSleep )) ; do
+  for (( elapsed=0; elapsed <= maxSleep; )) ; do
     out="$(eval $cmd)"
     err=$?
     (( err != 0 )) && break
     expect="${out#*/}"
     have="${out%/*}"
     (( have == expect )) && break
-    sleep 1
-    ((elapsed++))
+    increment=$(((elapsed/15)+1)) # sleep an extra second every 15s
+    ((elapsed+=increment))
     echo "...waiting $elapsed sec for $expect containers to be Ready, have $have..."
+    sleep $increment
   done
 
   (( elapsed > maxSleep )) && err=2
@@ -34,8 +35,7 @@ function waitForContainerRunning() {
 
 # Executes the passed-in kubectl cmd and compares its output with the passed-in match string.
 # Returns an error if the loop times-out or if the cmd generates an error. The output produced by
-# the command is expected to be santitized, eg. removing spaces/tabs to better handle json or yaml
-# output.
+# the command is expected to be santitized, eg. removing spaces/tabs to better handle json or yaml.
 # args: $1= the command to execute which produces the string to be matched against. Note this
 #           string is expected to have all whitespaces removed, eg. `tr -d "[:space:]"`
 #       $2= the match string
@@ -47,17 +47,17 @@ function waitForMatch() {
   match="$2"
   object="$3"
   maxSleep=${4:-5}
-  elapsed=0
   err=0
 
-  until (( elapsed > maxSleep )) ; do
+  for (( elapsed=0; elapsed <= maxSleep; )) ; do
     out="$(eval $cmd)"
     err=$?
     (( err != 0 )) && break
     [[ "$out" == "$match" ]] && break
-    sleep 1
-    ((elapsed++))
+    increment=$(((elapsed/15)+1)) # sleep an extra second every 15s
+    ((elapsed+=increment))
     echo "...waiting $elapsed sec for $object match. Have: \"$out\", expect: \"$match\"..."
+    sleep $increment
   done
 
   (( elapsed > maxSleep )) && err=2
@@ -74,13 +74,14 @@ function waitForCmdSuccess() {
   elapsed=0
   err=0
 
-  until (( elapsed > maxSleep )) ; do
+  for (( elapsed=0; elapsed <= maxSleep; )) ; do
     out="$(eval $cmd)"
     err=$?
     (( err == 0 )) && break
-    sleep 1
-    ((elapsed++))
+    increment=$(((elapsed/15)+1)) # sleep an extra second every 15s
+    ((elapsed+=increment))
     echo "...waiting $elapsed sec for cmd \"$cmd\" to succeed..."
+    sleep $increment
   done
 
   (( elapsed > maxSleep )) && err=2
@@ -129,9 +130,9 @@ cd $sc_path
 # check kube-dns is running (assumed to be local cluster)
 echo
 echo "** ensure kube-dns is running..."
-cnt="$(kubectl get pod -n kube-system | grep kube-dns | awk '{print $2}')"
-if [[ "$cnt" != "3/3" ]] ; then
-  echo "not all kube-dns containers are running: $cnt"
+waitForContainerRunning "kubectl get pod -n kube-system | grep kube-dns | awk '{print \$2}'" 30
+if (( $? != 0 )) ; then
+  echo "not all kube-dns containers are running"
   exit 1
 fi
 
@@ -148,7 +149,7 @@ echo "--> helm init"
 echo
 helm init
 waitForContainerRunning "kubectl get pod -n kube-system | grep tiller-deploy | awk '{print \$2}'" 30
-if (( $? )) ; then
+if (( $? != 0 )) ; then
   echo "tiller container is not running"
   exit 1
 fi
@@ -159,12 +160,12 @@ echo "--> helm install charts/catalog --name catalog --namespace catalog"
 echo
 helm install charts/catalog --name catalog --namespace catalog
 waitForContainerRunning "kubectl get pod -n catalog | grep catalog-catalog-apiserver | awk '{print \$2}'" 30
-if (( $? )) ; then
+if (( $? != 0 )) ; then
   echo "catalog-apiserver pod is not running"
   exit 1
 fi
 waitForContainerRunning "kubectl get pod -n catalog | grep catalog-catalog-manager | awk '{print \$2}'" 30
-if (( $? )) ; then
+if (( $? != 0 )) ; then
   echo "catalog-manager pod is not running"
   exit 1
 fi
