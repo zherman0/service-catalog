@@ -102,56 +102,38 @@ func (c *userProvidedController) CreateServiceInstance(
 	defer c.rwMutex.Unlock()
 
 	//DEBUG
-	glog.Info("[DEBUG] New CreateServiceInstanceRequest (ID: %q)", id)
+	glog.Info("[DEBUG] Create ServiceInstance Request (ID: %q)", id)
 
 	if _, ok := c.instanceMap[id]; ok {
 		return nil, fmt.Errorf("Instance %q already exists", id)
 	}
 	// Create New Instance
-	c.instanceMap[id] = &userProvidedServiceInstance{
+	newInstance := &userProvidedServiceInstance{
 		Id:        id,
 		ServiceID: req.ServiceID,
+		Namespace: req.ContextProfile.Namespace,
 	}
-
-	// Extract credentials from request or generate dummy
-	credString, ok := req.Parameters["credentials"]
-	if ok {
-		jsonCred, err := json.Marshal(credString)
-		if err != nil {
-			glog.Errorf("Failed to marshal credentials: %v", err)
-			return nil, err
-		}
-		var cred brokerapi.Credential
-		err = json.Unmarshal(jsonCred, &cred)
-		c.instanceMap[id].Credential = &cred
-	} else {
-		c.instanceMap[id].Credential = &brokerapi.Credential{
-			"special-key-1": "special-value-1",
-			"special-key-2": "special-value-2",
-		}
-	}
-
 	// Do provisioning logic based on service id
-	switch c.instanceMap[id].ServiceID {
+	switch newInstance.ServiceID {
 	case serviceidUserProvided:
 		break
 	case serviceidDatabasePod:
-		ns, err := provisionDBInstance(id, req.ContextProfile.Namespace)
+		err := doDBProvision(id, newInstance.Namespace)
 		if err != nil {
 			return nil, err
 		}
-		c.instanceMap[id].Namespace = ns
 	}
-	glog.Infof("Provisioned Instance: %q", c.instanceMap[id].Id)
+	glog.Infof("Provisioned Instance %q in Namespace %q", newInstance.Id, newInstance.Namespace)
+	c.instanceMap[id] = newInstance
 	return nil, nil
 }
 
 func (c *userProvidedController) GetServiceInstance(id string) (string, error) {
-	c.rwMutex.Lock()
-	defer c.rwMutex.Unlock()
+	c.rwMutex.RLock()
+	defer c.rwMutex.RUnlock()
 
 	// DEBUG
-	glog.Infof("[DEBUG] GetServiceInstance, ID: %q", id)
+	glog.Infof("[DEBUG] Get ServiceInstance Request (ID: %q)", id)
 
 	if _, ok := c.instanceMap[id]; ! ok {
 		return "", errNoSuchInstance{instanceID: id }
@@ -165,7 +147,7 @@ func (c *userProvidedController) RemoveServiceInstance(id string) (*brokerapi.De
 	defer c.rwMutex.Unlock()
 
 	// DEBUG
-	glog.Infof("[DEBUG] RemoveServiceInstance %q", id)
+	glog.Infof("[DEBUG] Remove ServiceInstance Request (ID: %q)", id)
 
 	if _, ok := c.instanceMap[id]; ! ok {
 		return nil, errNoSuchInstance{instanceID: id}
@@ -174,7 +156,7 @@ func (c *userProvidedController) RemoveServiceInstance(id string) (*brokerapi.De
 	case serviceidUserProvided:
 		break
 	case serviceidDatabasePod:
-		if err := deprovisionDBInstance(id, c.instanceMap[id].Namespace); err != nil {
+		if err := doDBDeprovision(id, c.instanceMap[id].Namespace); err != nil {
 			err = fmt.Errorf("Error deprovisioning instance %q, %v", id, err)
 			glog.Error(err)
 			return nil, err
@@ -185,6 +167,7 @@ func (c *userProvidedController) RemoveServiceInstance(id string) (*brokerapi.De
 	return nil, nil
 }
 
+// TODO implment bindMap to track db bindings (user, bindId, etc.)
 func (c *userProvidedController) Bind(
 	instanceID,
 	bindingID string,
@@ -192,30 +175,53 @@ func (c *userProvidedController) Bind(
 ) (*brokerapi.CreateServiceBindingResponse, error) {
 	c.rwMutex.RLock()
 	defer c.rwMutex.RUnlock()
+
+	// DEBUG
+	glog.Infof("[DEBUG] Bind ServiceInstance Request (ID: %q)", instanceID)
+
 	instance, ok := c.instanceMap[instanceID]
 	if !ok {
 		return nil, errNoSuchInstance{instanceID: instanceID}
 	}
+	var newCredential *brokerapi.Credential
 	switch c.instanceMap[instanceID].ServiceID {
 	case serviceidUserProvided:
-		break
+		// Extract credentials from request or generate dummy
+		newCredential = &brokerapi.Credential{
+			"special-key-1": "special-value-1",
+			"special-key-2": "special-value-2",
+		}
 	case serviceidDatabasePod:
-		podIP, podPort, err := getInstancePodIP(c.instanceMap[instanceID])
+		ip, port, err := doDBBind(instanceID, instance.Namespace)
 		if err != nil {
 			return nil, err
 		}
-		return &brokerapi.CreateServiceBindingResponse{
-			Credentials: brokerapi.Credential{
-				"mongo_svc_ip_port": fmt.Sprintf("%s:%d", podIP, podPort),
-			},
-		}, nil
+		newCredential = &brokerapi.Credential{
+			"mongo_svc_ip_port": fmt.Sprintf("%s:%d", ip, port),
+		}
 	}
-	cred := instance.Credential
+	instance.Credential = newCredential
 	glog.Infof("Bound Instance: %q", instanceID)
-	return &brokerapi.CreateServiceBindingResponse{Credentials: *cred}, nil
+	return &brokerapi.CreateServiceBindingResponse{Credentials: *newCredential}, nil
 }
 
 //TODO implement DB unbinding
 func (c *userProvidedController) UnBind(instanceID string, bindingID string) error {
+	c.rwMutex.RLock()
+	defer c.rwMutex.RUnlock()
+	// DEBUG
+	glog.Infof("[DEBUG] Unind ServiceInstance Request (ID: %q)", instanceID)
+
+	instance, ok := c.instanceMap[instanceID]
+	if !ok {
+		return errNoSuchInstance{instanceID: instanceID}
+	}
+	switch instance.ServiceID {
+	case serviceidUserProvided:
+		// nothing to do
+	case serviceidDatabasePod:
+		doDBUnbind()
+	}
+	glog.Infof("Unbound Instance: %q", instanceID)
 	return nil
 }

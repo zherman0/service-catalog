@@ -1,7 +1,7 @@
 package controller
 
 import (
-	"errors"
+	"fmt"
 
 	"github.com/golang/glog"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -15,46 +15,49 @@ const (
 	MONGO_INITDB_ROOT_USERNAME_VALUE = "admin"
 	MONGO_INITDB_ROOT_PASSWORD_NAME  = "MONGO_INITDB_ROOT_PASSWORD" // DO NOT CHANGE - must match docker image variable
 	MONGO_INITDB_ROOT_PASSWORD_VALUE = "password"
-	INST_RESOURCE_LABEL_NAME         = "instanceId"
+	INST_RESOURCE_LABEL_NAME         = "instanceID"
 )
 
-func provisionDBInstance(instanceID, ns string) (string, error) {
-	cs, err := getKubeClient()
-	if err != nil {
-		return "", err
-	}
+func doDBProvision(instanceID, ns string) (error) {
 	if ns == "" {
 		glog.Error("Request Context does not contain a Namespace")
-		return "", errors.New("Namespace not detected in Request")
+		return fmt.Errorf("Namespace not detected in Request")
 	}
-	pod, sec := newDatabaseInstance(instanceID)
+	cs, err := getKubeClient()
+	if err != nil {
+		return err
+	}
+	pod, sec := newDBInstanceResources(instanceID)
 	sec, err = cs.CoreV1().Secrets(ns).Create(sec)
 	if err != nil {
 		glog.Errorf("Failed to Create secret: %v", err)
-		return "", nil
+		return err
 	}
 	pod, err = cs.CoreV1().Pods(ns).Create(pod)
 	if err != nil {
 		cs.CoreV1().Secrets(ns).Delete(sec.Name, &metav1.DeleteOptions{})
 		glog.Errorf("Failed to Create pod: %q", err)
-		return "", err
+		return err
 	}
 	glog.Infof("Provisioned Instance Pod %q (ns: %s)", pod.Name, ns)
-	return pod.Namespace, nil
+	return nil
 }
 
-func deprovisionDBInstance(instanceID, ns string) error {
+func doDBDeprovision(instanceID, ns string) error {
+	if ns == "" {
+		glog.Error("Request Context does not contain a Namespace")
+		return fmt.Errorf("Namespace not detected in Request")
+	}
 	cs, err := getKubeClient()
 	if err != nil {
 		return err
 	}
 	glog.Infof("Deleting Instance Pod (ID: %v)", instanceID)
-	err = cs.CoreV1().Pods(ns).DeleteCollection(&metav1.DeleteOptions{}, metav1.ListOptions{
+	errPod := cs.CoreV1().Pods(ns).DeleteCollection(&metav1.DeleteOptions{}, metav1.ListOptions{
 		LabelSelector: INST_RESOURCE_LABEL_NAME + "=" + instanceID,
 	})
 	if err != nil {
 		glog.Errorf("Error deleting Instance Pod (ID: %v): %v", instanceID, err)
-		return err
 	}
 	glog.Infof("Deleting Instance Secret (ID: %v)", instanceID)
 	err = cs.CoreV1().Secrets(ns).DeleteCollection(&metav1.DeleteOptions{}, metav1.ListOptions{
@@ -62,19 +65,35 @@ func deprovisionDBInstance(instanceID, ns string) error {
 	})
 	if err != nil {
 		glog.Errorf("Error deleting Instance Secret (ID: %v): %v", instanceID, err)
+		if errPod != nil {
+			err = fmt.Errorf("Errors deprovisioning instance %q\n%v\n%v", instanceID, errPod, err)
+		}
 		return err
 	}
 	return nil
 }
 
-func getInstancePodIP(instance *userProvidedServiceInstance) (string, int32, error) {
+// TODO implement db user creation via `mgo` package
+func doDBBind(instanceID, ns string) (string, int32, error) {
+	ip, port, err := getDBPodIP(instanceID, ns)
+	if err != nil {
+		return "", 0, err
+	}
+	return ip, port, nil
+}
+
+// TODO implement db user deletion via `mgo` package
+func doDBUnbind() (string, error) {
+	return "MongoDB Unbind not implemented.", nil
+}
+
+func getDBPodIP(instanceID, ns string) (string, int32, error) {
 	cs, err := getKubeClient()
 	if err != nil {
 		return "", 0, err
 	}
-	pods, err := cs.CoreV1().Pods(instance.Namespace).List(metav1.ListOptions{
-		LabelSelector: INST_RESOURCE_LABEL_NAME,
-		FieldSelector: instance.Id,
+	pods, err := cs.CoreV1().Pods(ns).List(metav1.ListOptions{
+		LabelSelector: INST_RESOURCE_LABEL_NAME+ "=" + instanceID,
 	})
 	if err != nil {
 		return "", 0, err
@@ -86,7 +105,7 @@ func getKubeClient() (*kubernetes.Clientset, error) {
 	glog.Info("Getting API Client config")
 	kubeClientConfig, err := rest.InClusterConfig()
 	if err != nil {
-		panic(err.Error())
+		return nil, err
 	}
 
 	glog.Info("Creating new Kubernetes Clientset")
@@ -94,12 +113,7 @@ func getKubeClient() (*kubernetes.Clientset, error) {
 	return cs, err
 }
 
-// TODO find a DB image to use here
-// TODO figure out how to get the credentials
-// TODO currently just a debian pod for testing
-// TODO probably better to use a Deployment so we can keep it behind a known IP.
-// TODO DB and webserver pod templates in kubernetes/examples.  Might be useful
-func newDatabaseInstance(instanceID string) (*v1.Pod, *v1.Secret) {
+func newDBInstanceResources(instanceID string) (*v1.Pod, *v1.Secret) {
 	secretName := "db-" + instanceID + "-secret"
 	isOptional := false
 
@@ -126,7 +140,7 @@ func newDatabaseInstance(instanceID string) (*v1.Pod, *v1.Secret) {
 							},
 						},
 					},
-					Args: []string{"mongod"},  // TODO this is where createUser cmd will be appended
+					Args: []string{"mongod"},
 					Ports: []v1.ContainerPort{
 						{
 							Name:          "mongodb",
