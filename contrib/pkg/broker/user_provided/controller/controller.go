@@ -116,7 +116,6 @@ func (c *userProvidedController) CreateServiceInstance(
 	// Do provisioning logic based on service id
 	switch newInstance.ServiceID {
 	case serviceidUserProvided:
-		break
 	case serviceidDatabasePod:
 		err := doDBProvision(id, newInstance.Namespace)
 		if err != nil {
@@ -154,7 +153,6 @@ func (c *userProvidedController) RemoveServiceInstance(id string) (*brokerapi.De
 	}
 	switch c.instanceMap[id].ServiceID {
 	case serviceidUserProvided:
-		break
 	case serviceidDatabasePod:
 		if err := doDBDeprovision(id, c.instanceMap[id].Namespace); err != nil {
 			err = fmt.Errorf("Error deprovisioning instance %q, %v", id, err)
@@ -197,10 +195,11 @@ func (c *userProvidedController) Bind(
 			return nil, err
 		}
 		newCredential = &brokerapi.Credential{
-			"mongo_svc_ip_port": fmt.Sprintf("%s:%d", ip, port),
+			"mongoInstanceIp": ip,
+			"mongoInstancePort": port,
 		}
 	}
-	instance.Credential = newCredential
+	c.instanceMap[instanceID].Credential = newCredential
 	glog.Infof("Bound Instance: %q", instanceID)
 	return &brokerapi.CreateServiceBindingResponse{Credentials: *newCredential}, nil
 }
