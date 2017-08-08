@@ -64,6 +64,8 @@ const (
 	serviceidUserProvided string = "4f6e6cf6-ffdd-425f-a2c7-3c9258ad2468"
 	// serviceidDatabasePod  provides an instance of a mongo db
 	serviceidDatabasePod  string = "database-1"
+	// serviceidNginXPod  provides an instance of a nginx server
+	serviceidNginXPod  string = "nginx-1"
 )
 
 // CreateBroker initializes the service broker.  This function is called by server.Start()
@@ -107,6 +109,20 @@ func (b *userProvidedBroker) Catalog() (*brokerapi.Catalog, error) {
 				},
 				Bindable: true,
 			},
+			{
+				Name:        "nginx-service",
+				ID:          serviceidNginXPod,
+				Description: "A nginx pod service.",
+				Plans: []brokerapi.ServicePlan{
+					{
+						Name:        "default",
+						ID:          "default",
+						Description: "Web Server nginx.",
+						Free:        true,
+					},
+				},
+				Bindable: true,
+			},
 		},
 	}, nil
 }
@@ -137,6 +153,11 @@ func (b *userProvidedBroker) CreateServiceInstance(
 	case serviceidUserProvided:
 	case serviceidDatabasePod:
 		err := doDBProvision(instanceID, newInstance.Namespace)
+		if err != nil {
+			return nil, err
+		}
+	case serviceidNginXPod:
+		err := doNginXProvision(instanceID, newInstance.Namespace)
 		if err != nil {
 			return nil, err
 		}
@@ -180,6 +201,12 @@ func (b *userProvidedBroker) RemoveServiceInstance(
 			glog.Error(err)
 			return nil, err
 		}
+	case serviceidNginXPod:
+		if err := doNginXDeprovision(instanceID, b.instanceMap[instanceID].Namespace); err != nil {
+			err = fmt.Errorf("Error deprovisioning instance %q, %v", instanceID, err)
+			glog.Error(err)
+			return nil, err
+		}
 	}
 	glog.Infof("Deprovisioned Instance: %q", b.instanceMap[instanceID].Id)
 	delete(b.instanceMap, instanceID)
@@ -218,6 +245,15 @@ func (b *userProvidedBroker) Bind(
 			"mongoInstanceIp": ip,
 			"mongoInstancePort": port,
 		}
+        case serviceidNginXPod:
+		ip, port, err := doNXBind(instanceID, instance.Namespace)
+		if err != nil {
+			return nil, err
+		}
+		newCredential = &brokerapi.Credential{
+			"nginxInstanceIp": ip,
+			"nginxInstancePort": port,
+		}
 	}
 	b.instanceMap[instanceID].Credential = newCredential
 	glog.Infof("Bound Instance: %q", instanceID)
@@ -243,6 +279,8 @@ func (b *userProvidedBroker) UnBind(instanceID, bindingID, serviceID, planID str
 		// Do nothing
 	case serviceidDatabasePod:
 		doDBUnbind()
+	case serviceidNginXPod:
+		doNXUnbind()
 	}
 	glog.Infof("Unbound Instance: %q", instanceID)
 	return nil
