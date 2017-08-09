@@ -149,7 +149,7 @@ func newNginXInstanceResources(instanceID string) (*v1.Pod, *v1.Secret) {
 					Ports: []v1.ContainerPort{
 						{
 							Name:          "nginx",
-							ContainerPort: 8081,
+							ContainerPort: 80,
 						},
 					},
 				},
