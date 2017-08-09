@@ -145,7 +145,7 @@ func newNginXInstanceResources(instanceID string) (*v1.Pod, *v1.Secret) {
 							},
 						},
 					},
-					Args: []string{"nginxd"},
+					Args: []string{},
 					Ports: []v1.ContainerPort{
 						{
 							Name:          "nginx",
