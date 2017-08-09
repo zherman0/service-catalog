@@ -1,0 +1,8 @@
+apiVersion: servicecatalog.k8s.io/v1alpha1
+kind: Instance
+metadata:
+  name: nginx-instance
+  namespace: web-test
+spec:
+  serviceClassName: nginx-service
+  planName: default
