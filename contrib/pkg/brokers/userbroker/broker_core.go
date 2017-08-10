@@ -66,6 +66,8 @@ const (
 	serviceidDatabasePod  string = "database-1"
 	// serviceidNginXPod  provides an instance of a nginx server
 	serviceidNginXPod  string = "nginx-1"
+	// serviceidHeketiPod  provides an instance of a nginx server
+	serviceidHeketiPod  string = "heketi-1"
 )
 
 // CreateBroker initializes the service broker.  This function is called by server.Start()
@@ -123,6 +125,20 @@ func (b *userProvidedBroker) Catalog() (*brokerapi.Catalog, error) {
 				},
 				Bindable: true,
 			},
+			{
+				Name:        "heketi-service",
+				ID:          serviceidHeketiPod,
+				Description: "A heketi pod service.",
+				Plans: []brokerapi.ServicePlan{
+					{
+						Name:        "default",
+						ID:          "default",
+						Description: "Heketi client pod.",
+						Free:        true,
+					},
+				},
+				Bindable: true,
+			},
 		},
 	}, nil
 }
@@ -158,6 +174,11 @@ func (b *userProvidedBroker) CreateServiceInstance(
 		}
 	case serviceidNginXPod:
 		err := doNginXProvision(instanceID, newInstance.Namespace)
+		if err != nil {
+			return nil, err
+		}
+	case serviceidHeketiPod:
+		err := doHeketiProvision(instanceID, newInstance.Namespace)
 		if err != nil {
 			return nil, err
 		}
@@ -203,6 +224,12 @@ func (b *userProvidedBroker) RemoveServiceInstance(
 		}
 	case serviceidNginXPod:
 		if err := doNginXDeprovision(instanceID, b.instanceMap[instanceID].Namespace); err != nil {
+			err = fmt.Errorf("Error deprovisioning instance %q, %v", instanceID, err)
+			glog.Error(err)
+			return nil, err
+		}
+	case serviceidHeketiPod:
+		if err := doHeketiDeprovision(instanceID, b.instanceMap[instanceID].Namespace); err != nil {
 			err = fmt.Errorf("Error deprovisioning instance %q, %v", instanceID, err)
 			glog.Error(err)
 			return nil, err
@@ -254,6 +281,15 @@ func (b *userProvidedBroker) Bind(
 			"nginxInstanceIp": ip,
 			"nginxInstancePort": port,
 		}
+        case serviceidHeketiPod:
+		ip, port, err := doHeketiBind(instanceID, instance.Namespace)
+		if err != nil {
+			return nil, err
+		}
+		newCredential = &brokerapi.Credential{
+			"heketiInstanceIp": ip,
+			"heketiInstancePort": port,
+		}
 	}
 	b.instanceMap[instanceID].Credential = newCredential
 	glog.Infof("Bound Instance: %q", instanceID)
@@ -281,6 +317,8 @@ func (b *userProvidedBroker) UnBind(instanceID, bindingID, serviceID, planID str
 		doDBUnbind()
 	case serviceidNginXPod:
 		doNXUnbind()
+	case serviceidHeketiPod:
+		doHeketiUnbind()
 	}
 	glog.Infof("Unbound Instance: %q", instanceID)
 	return nil
