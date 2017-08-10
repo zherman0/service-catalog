@@ -119,12 +119,12 @@ func getHeketiPodIP(instanceID, ns string) (string, int32, error) {
 
 // newHeketiInstanceResources returns a Heketi pod and secret definition
 func newHeketiInstanceResources(instanceID string) (*v1.Pod, *v1.Secret) {
-	secretName := "Heketi-" + instanceID + "-secret"
+	secretName := "heketi-" + instanceID + "-secret"
 	isOptional := false
 
 	return &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "Heketi-" + instanceID,
+			Name: "heketi-" + instanceID,
 			Labels: map[string]string{
 				INST_RESOURCE_LABEL_NAME: instanceID,
 			},
@@ -132,7 +132,7 @@ func newHeketiInstanceResources(instanceID string) (*v1.Pod, *v1.Secret) {
 		Spec: v1.PodSpec{
 			Containers: []v1.Container{
 				{
-					Name:            "Heketi",
+					Name:            "heketi",
 					Image:           "heketi/heketi:dev",
 					ImagePullPolicy: "IfNotPresent",
 					EnvFrom: []v1.EnvFromSource{
@@ -148,7 +148,7 @@ func newHeketiInstanceResources(instanceID string) (*v1.Pod, *v1.Secret) {
 					Args: []string{},
 					Ports: []v1.ContainerPort{
 						{
-							Name:          "Heketi",
+							Name:          "heketi",
 							ContainerPort: 8080,
 						},
 					},
